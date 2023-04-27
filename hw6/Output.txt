@@ -1,0 +1,39 @@
+Employee's ID is 1
+Employee's Name is Shoaib, H, Nadeem
+Employee's Dept Code: 16
+
+Employee's ID is 2
+Employee's Name is Nick, B, Sewell
+Employee's Dept Code: 9
+
+Employee's ID is 3
+Employee's Name is Jack, L, Sewell
+Employee's Dept Code: 2
+
+Employee's ID is 4
+Employee's Name is Rayyan, T, Zindanni
+Employee's Dept Code: 7
+Hours worked: 24
+Regular hourly rate: 15.5
+Overtime Rate (if 160 hours worked): 23.25
+Monthly Income this paycheck: $ 372.0
+
+Employee's ID is 5
+Employee's Name is Lebron, E, James
+Employee's Dept Code: 3
+Hours worked: 50
+Regular hourly rate: 20.75
+Overtime Rate (if 160 hours worked): 31.125
+Monthly Income this paycheck: $ 1037.5
+
+Employee's ID is 6
+Employee's Name is Chris, F, Tucker
+Employee's Dept Code: 21
+Monthly Salary working full-time: $ 60000
+With adjustments for how much time worked - Salary now: $ 57600.0
+
+Employee's ID is 7
+Employee's Name is Keanu, S, Reeves
+Employee's Dept Code: 1
+Monthly Salary working full-time: $ 110000
+With adjustments for how much time worked - Salary now: $ 108900.0
