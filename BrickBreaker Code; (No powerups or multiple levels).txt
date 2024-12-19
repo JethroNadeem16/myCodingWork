@@ -1,0 +1,481 @@
+library ieee;
+use ieee.std_logic_1164.all;
+use ieee.numeric_std.all;
+
+entity pong_graph_st is
+   port(
+        clk        : in  std_logic;
+        reset      : in  std_logic;
+        btn        : in  std_logic_vector(2 downto 0);
+        video_on   : in  std_logic;
+        pixel_x    : in  std_logic_vector(9 downto 0);
+        pixel_y    : in  std_logic_vector(9 downto 0);
+        graph_rgb  : out std_logic_vector(2 downto 0)
+   );
+end pong_graph_st;
+
+--Shoaib
+architecture rtl of pong_graph_st is
+    -- Constants for screen dimensions
+    constant MAX_X : integer := 640;
+    constant MAX_Y : integer := 480;
+
+    -- Paddle properties
+    constant PADDLE_WIDTH  : integer := 60;
+    constant PADDLE_HEIGHT : integer := 10;
+    signal paddle_x_reg : integer range 0 to MAX_X - PADDLE_WIDTH := 290; -- Initial position
+    constant PADDLE_Y_TOP    : integer := 450; -- Fixed vertical position
+    constant PADDLE_Y_BOTTOM : integer := PADDLE_Y_TOP + PADDLE_HEIGHT;
+    constant PADDLE_VEL      : integer := 5; -- Velocity for paddle movement
+
+    -- Track paddle direction: -1 = left, 0 = still, 1 = right
+    signal paddle_dir : integer range -1 to 1 := 0;
+
+    -- Ball properties
+    constant BALL_SIZE : integer := 8;
+    signal ball_x_reg, ball_y_reg : integer range -BALL_SIZE to MAX_X + BALL_SIZE;
+    signal x_delta_reg, y_delta_reg : integer range -4 to 4;
+    constant BALL_V_POS : integer := 3;
+    constant BALL_V_NEG : integer := -3;
+    constant MAX_X_VEL  : integer := 4; -- Max horizontal speed
+
+    -- Ball on paddle signal
+    signal ball_on_paddle : std_logic := '1';
+
+    -- Brick properties
+    constant BRICK_WIDTH  : integer := 50;
+    constant BRICK_HEIGHT : integer := 20;
+    constant BRICK_ROWS   : integer := 9;
+    constant BRICK_COLS   : integer := 11;
+
+    type brick_array_type is array (0 to BRICK_ROWS-1, 0 to BRICK_COLS-1) of integer range 0 to 3; 
+    signal brick_array: brick_array_type := (
+        0 => (0 => 0, 1 => 3, 2 => 3, 3 => 3, 4 => 3, 5 => 3, 6 => 3, 7 => 3, 8 => 3, 9 => 3, 10 => 3), 
+        1 => (0 => 0, 1 => 2, 2 => 2, 3 => 2, 4 => 2, 5 => 2, 6 => 2, 7 => 2, 8 => 2, 9 => 2, 10 => 2),
+        2 => (0 => 0, 1 => 1, 2 => 1, 3 => 1, 4 => 1, 5 => 1, 6 => 1, 7 => 1, 8 => 1, 9 => 1, 10 => 1), 
+        3 => (0 => 0, 1 => 0, 2 => 0, 3 => 0, 4 => 0, 5 => 2, 6 => 0, 7 => 0, 8 => 0, 9 => 0, 10 => 0),
+        4 => (0 => 0, 1 => 0, 2 => 0, 3 => 0, 4 => 0, 5 => 1, 6 => 0, 7 => 0, 8 => 0, 9 => 0, 10 => 0),
+        5 => (0 => 0, 1 => 0, 2 => 0, 3 => 0, 4 => 0, 5 => 2, 6 => 0, 7 => 0, 8 => 0, 9 => 0, 10 => 0),
+        6 => (0 => 0, 1 => 1, 2 => 1, 3 => 1, 4 => 1, 5 => 1, 6 => 1, 7 => 1, 8 => 1, 9 => 1, 10 => 1),
+        7 => (0 => 0, 1 => 2, 2 => 2, 3 => 2, 4 => 2, 5 => 2, 6 => 2, 7 => 2, 8 => 2, 9 => 2, 10 => 2),
+        8 => (0 => 0, 1 => 3, 2 => 3, 3 => 3, 4 => 3, 5 => 3, 6 => 3, 7 => 3, 8 => 3, 9 => 3, 10 => 3)
+    );
+
+    -- Pixel coordinates
+    signal pix_x_int, pix_y_int : integer range 0 to MAX_X;
+
+    -- Refresh tick signal
+    signal refr_tick : std_logic;
+
+    -- Graphics signals
+    signal paddle_on, ball_on, brick_on : std_logic;
+    signal paddle_rgb, ball_rgb, brick_rgb : std_logic_vector(2 downto 0);
+
+    -- Scoring system
+    signal score : integer range 0 to 999 := 0;
+
+    -- Number of lives
+    signal lives : integer range 0 to 9 := 4; -- Start with extra life for testing
+
+    -- Game over flag
+    signal game_over : std_logic := '0';
+
+    -- Font ROM for digits (0-9), 5x8 font
+    type font_array_type is array (0 to 9, 0 to 7) of std_logic_vector(4 downto 0);
+    constant FONT_ROM : font_array_type := (
+        -- Digit 0
+        ("01110", "10001", "10001", "10001", "10001", "10001", "01110", "00000"),
+        -- Digit 1
+        ("00100", "01100", "00100", "00100", "00100", "00100", "01110", "00000"),
+        -- Digit 2
+        ("01110", "10001", "00001", "00110", "01000", "10000", "11111", "00000"),
+        -- Digit 3
+        ("11111", "00010", "00100", "00010", "00001", "10001", "01110", "00000"),
+        -- Digit 4
+        ("00010", "00110", "01010", "10010", "11111", "00010", "00010", "00000"),
+        -- Digit 5
+        ("11111", "10000", "11110", "00001", "00001", "10001", "01110", "00000"),
+        -- Digit 6
+        ("00110", "01000", "10000", "11110", "10001", "10001", "01110", "00000"),
+        -- Digit 7
+        ("11111", "00001", "00010", "00100", "01000", "01000", "01000", "00000"),
+        -- Digit 8
+        ("01110", "10001", "10001", "01110", "10001", "10001", "01110", "00000"),
+        -- Digit 9
+        ("01110", "10001", "10001", "01111", "00001", "00010", "01100", "00000")
+    );
+
+    -- Signals for score display (three digits)
+    signal digit_hundreds, digit_tens, digit_units : integer range 0 to 9;
+    signal digit_hundreds_on, digit_tens_on, digit_units_on : std_logic;
+    signal font_word_hundreds, font_word_tens, font_word_units : std_logic_vector(4 downto 0);
+    signal font_bit_hundreds, font_bit_tens, font_bit_units : std_logic;
+
+    -- Signals for lives display
+    signal lives_digit_on : std_logic;
+    signal font_word_lives : std_logic_vector(4 downto 0);
+    signal font_bit_lives : std_logic;
+
+    signal speed_factor : integer := 1;
+    constant MAX_SPEED_FACTOR : integer := 2;
+
+--Raymond
+begin
+
+    -- Convert pixel coordinates
+    pix_x_int <= to_integer(unsigned(pixel_x));
+    pix_y_int <= to_integer(unsigned(pixel_y));
+
+    -- Refresh tick at start of each frame
+    refr_tick <= '1' when (pix_x_int = 1 and pix_y_int = 1) else '0';
+
+    -- Paddle Rendering
+    paddle_on <= '1' when (
+                  pix_x_int >= paddle_x_reg and
+                  pix_x_int < paddle_x_reg + PADDLE_WIDTH and
+                  pix_y_int >= PADDLE_Y_TOP and
+                  pix_y_int < PADDLE_Y_BOTTOM
+                ) else '0';
+    paddle_rgb <= "111"; -- White
+
+    -- Paddle Movement and Direction Tracking
+    process(clk, reset)
+        variable old_paddle_pos : integer := 290;
+    begin
+        if reset = '1' then
+            paddle_x_reg <= 290;
+            paddle_dir   <= 0;
+            old_paddle_pos := 290;
+        elsif rising_edge(clk) then
+            if refr_tick = '1' then
+                -- Update paddle position based on buttons
+                if btn(1) = '1' and (paddle_x_reg + PADDLE_VEL + PADDLE_WIDTH) <= MAX_X then
+                    paddle_x_reg <= paddle_x_reg + PADDLE_VEL; -- Move right
+                elsif btn(0) = '1' and (paddle_x_reg - PADDLE_VEL) >= 0 then
+                    paddle_x_reg <= paddle_x_reg - PADDLE_VEL; -- Move left
+                end if;
+
+                -- Determine paddle direction
+                if paddle_x_reg > old_paddle_pos then
+                    paddle_dir <= 1; -- Moved right
+                elsif paddle_x_reg < old_paddle_pos then
+                    paddle_dir <= -1; -- Moved left
+                else
+                    paddle_dir <= 0; -- Still
+                end if;
+
+                old_paddle_pos := paddle_x_reg;
+            end if;
+        end if;
+    end process;
+
+    -- Ball Rendering
+    ball_on <= '1' when (
+                 pix_x_int >= ball_x_reg and
+                 pix_x_int < ball_x_reg + BALL_SIZE and
+                 pix_y_int >= ball_y_reg and
+                 pix_y_int < ball_y_reg + BALL_SIZE
+               ) else '0';
+    ball_rgb <= "110"; -- Magenta
+
+    --Shoaib
+    -- Ball Movement and Logic with Aim/Launch Mechanic
+    process(clk, reset)
+        variable ball_x_next, ball_y_next : integer range -BALL_SIZE to MAX_X + BALL_SIZE;
+        variable x_delta_next, y_delta_next : integer range -MAX_X_VEL to MAX_X_VEL;
+        variable impact_point : integer;
+    begin
+        if reset = '1' then
+            -- Reset the game and put ball on paddle
+            ball_on_paddle <= '1';
+            lives <= 4;
+            score <= 0;
+            game_over <= '0';
+
+            -- Reset bricks
+            brick_array <= (
+                0 => (0 => 0, 1 => 3, 2 => 3, 3 => 3, 4 => 3, 5 => 3, 6 => 3, 7 => 3, 8 => 3, 9 => 3, 10 => 3), 
+                1 => (0 => 0, 1 => 2, 2 => 2, 3 => 2, 4 => 2, 5 => 2, 6 => 2, 7 => 2, 8 => 2, 9 => 2, 10 => 2),
+                2 => (0 => 0, 1 => 1, 2 => 1, 3 => 1, 4 => 1, 5 => 1, 6 => 1, 7 => 1, 8 => 1, 9 => 1, 10 => 1), 
+                3 => (0 => 0, 1 => 0, 2 => 0, 3 => 0, 4 => 0, 5 => 2, 6 => 0, 7 => 0, 8 => 0, 9 => 0, 10 => 0),
+                4 => (0 => 0, 1 => 0, 2 => 0, 3 => 0, 4 => 0, 5 => 1, 6 => 0, 7 => 0, 8 => 0, 9 => 0, 10 => 0),
+                5 => (0 => 0, 1 => 0, 2 => 0, 3 => 0, 4 => 0, 5 => 2, 6 => 0, 7 => 0, 8 => 0, 9 => 0, 10 => 0),
+                6 => (0 => 0, 1 => 1, 2 => 1, 3 => 1, 4 => 1, 5 => 1, 6 => 1, 7 => 1, 8 => 1, 9 => 1, 10 => 1),
+                7 => (0 => 0, 1 => 2, 2 => 2, 3 => 2, 4 => 2, 5 => 2, 6 => 2, 7 => 2, 8 => 2, 9 => 2, 10 => 2),
+                8 => (0 => 0, 1 => 3, 2 => 3, 3 => 3, 4 => 3, 5 => 3, 6 => 3, 7 => 3, 8 => 3, 9 => 3, 10 => 3)
+            );
+
+        elsif rising_edge(clk) then
+            if refr_tick = '1' then
+                if ball_on_paddle = '1' then
+                    -- Keep ball on paddle
+                    ball_x_reg <= paddle_x_reg + (PADDLE_WIDTH/2) - (BALL_SIZE/2);
+                    ball_y_reg <= PADDLE_Y_TOP - BALL_SIZE;
+
+                    -- Launch the ball when btn(2) is pressed
+                    if btn(2) = '1' and game_over = '0' then
+                        ball_on_paddle <= '0';
+                        y_delta_reg <= BALL_V_NEG; -- Launch upward
+                        -- Set horizontal direction based on paddle_dir
+                        if paddle_dir = 0 then
+                            x_delta_reg <= 0; -- Straight up
+                        elsif paddle_dir = 1 then
+                            x_delta_reg <= -BALL_V_POS; -- Paddle moving right, launch ball to the left
+                        elsif paddle_dir = -1 then
+                            x_delta_reg <= BALL_V_POS; -- Paddle moving left, launch ball to the right
+                        end if;
+                    end if;
+                else
+                    -- Normal ball movement logic
+                    ball_x_next := ball_x_reg + x_delta_reg;
+                    ball_y_next := ball_y_reg + y_delta_reg;
+                    x_delta_next := x_delta_reg;
+                    y_delta_next := y_delta_reg;
+
+                    -- Check walls
+                    if ball_x_next <= 0 then
+                        ball_x_next  := 0;
+                        x_delta_next := abs(x_delta_next);
+                    elsif (ball_x_next + BALL_SIZE) >= MAX_X then
+                        ball_x_next  := MAX_X - BALL_SIZE;
+                        x_delta_next := -abs(x_delta_next);
+                    end if;
+
+                    if ball_y_next <= 0 then
+                        ball_y_next  := 0;
+                        y_delta_next := abs(y_delta_next);
+                    elsif (ball_y_next + BALL_SIZE) >= MAX_Y then
+                        -- Ball missed the paddle
+                        if lives > 1 then
+                            lives <= lives - 1;
+                            -- Reset ball to paddle
+                            ball_on_paddle <= '1';
+                        else
+                            -- Game over
+                            game_over <= '1';
+                        end if;
+                    end if;
+
+                    -- Check collision with paddle
+                    if (ball_y_next + BALL_SIZE >= PADDLE_Y_TOP) and
+                       (ball_y_next + BALL_SIZE <= PADDLE_Y_BOTTOM) and
+                       (ball_x_next + BALL_SIZE >= paddle_x_reg) and
+                       (ball_x_next <= paddle_x_reg + PADDLE_WIDTH) then
+                        ball_y_next  := PADDLE_Y_TOP - BALL_SIZE;
+                        y_delta_next := -abs(y_delta_next); -- reflect upward
+                        impact_point := (ball_x_next + (BALL_SIZE / 2)) - (paddle_x_reg + (PADDLE_WIDTH / 2));
+                        x_delta_next := (impact_point * MAX_X_VEL) / (PADDLE_WIDTH / 2);
+                        -- Limit x_delta_next
+                        if x_delta_next > MAX_X_VEL then
+                            x_delta_next := MAX_X_VEL;
+                        elsif x_delta_next < -MAX_X_VEL then
+                            x_delta_next := -MAX_X_VEL;
+                        end if;
+                    end if;
+
+                    -- Check collision with bricks
+                    brick_collision: for row in 0 to BRICK_ROWS-1 loop
+                        for col in 0 to BRICK_COLS-1 loop
+                            if brick_array(row, col) > 0 then
+                                if (ball_x_next + BALL_SIZE > col * BRICK_WIDTH) and
+                                   (ball_x_next < (col + 1)*BRICK_WIDTH) and
+                                   (ball_y_next + BALL_SIZE > row*BRICK_HEIGHT + 50) and
+                                   (ball_y_next < (row+1)*BRICK_HEIGHT + 50) then
+                                    -- Reflect vertical direction
+                                    y_delta_next := -y_delta_next;
+                                    -- Reduce brick strength
+                                    brick_array(row, col) <= brick_array(row, col) - 1;
+                                    -- Increase score
+                                    if score + (4 - brick_array(row, col)) <= 999 then
+                                        score <= score + (4 - brick_array(row, col));
+                                    else
+                                        score <= 999;
+                                    end if;
+                                    -- Adjust ball position to avoid sticking
+                                    if y_delta_next > 0 then
+                                        ball_y_next := (row + 1)*BRICK_HEIGHT + 50;
+                                    else
+                                        ball_y_next := (row * BRICK_HEIGHT + 50) - BALL_SIZE;
+                                    end if;
+                                    exit brick_collision;
+                                end if;
+                            end if;
+                        end loop;
+                    end loop;
+
+                    -- Update ball position and speed if not game over
+                    if game_over = '0' then
+                        ball_x_reg  <= ball_x_next;
+                        ball_y_reg  <= ball_y_next;
+                        x_delta_reg <= x_delta_next;
+                        y_delta_reg <= y_delta_next;
+                    end if;
+                end if;
+            end if;
+        end if;
+    end process;
+
+    --Raymond
+    -- Brick Rendering with Outline Only
+    process (pix_x_int, pix_y_int, brick_array)
+        variable brick_left, brick_right, brick_top, brick_bottom : integer;
+    begin
+        brick_on <= '0';
+        brick_rgb <= "000"; 
+        for row in 0 to BRICK_ROWS-1 loop
+            for col in 0 to BRICK_COLS-1 loop
+                if brick_array(row, col) > 0 then
+                    -- Calculate the brick boundaries
+                    brick_left   := col*BRICK_WIDTH;
+                    brick_right  := (col+1)*BRICK_WIDTH - 1;
+                    brick_top    := row*BRICK_HEIGHT + 50;
+                    brick_bottom := (row+1)*BRICK_HEIGHT + 50 - 1;
+
+                    if (pix_x_int >= brick_left and pix_x_int <= brick_right and
+                        pix_y_int >= brick_top and pix_y_int <= brick_bottom) then
+                        
+                        brick_on <= '1';
+
+                        -- Check if pixel is on the border of the brick
+                        if (pix_x_int = brick_left or pix_x_int = brick_right or
+                            pix_y_int = brick_top or pix_y_int = brick_bottom) then
+                            -- Border color (e.g., white)
+                            brick_rgb <= "111"; 
+                        else
+                            -- Inside the brick, choose color based on strength
+                            case brick_array(row, col) is
+                                when 3 => brick_rgb <= "100"; -- Red
+                                when 2 => brick_rgb <= "101"; -- Yellow
+                                when 1 => brick_rgb <= "001"; -- Green
+                                when others => brick_rgb <= "000";
+                            end case;
+                        end if;
+                    end if;
+                end if;
+            end loop;
+        end loop;
+    end process;
+
+    -- Score Display Logic (Three Digits)
+    process (clk, reset)
+    begin
+        if reset = '1' then
+            digit_hundreds <= 0;
+            digit_tens <= 0;
+            digit_units <= 0;
+        elsif rising_edge(clk) then
+            if refr_tick = '1' then
+                digit_hundreds <= score / 100;
+                digit_tens <= (score / 10) mod 10;
+                digit_units <= score mod 10;
+            end if;
+        end if;
+    end process;
+
+    -- Font Extraction for Hundreds Digit
+    process (pix_x_int, pix_y_int, digit_hundreds)
+        variable char_x_hundreds_var, char_y_hundreds_var : integer range 0 to 4;
+    begin
+        digit_hundreds_on <= '0';
+        if (pix_x_int >= 0) and (pix_x_int < 5) and (pix_y_int >= 10) and (pix_y_int < 18) then
+            char_x_hundreds_var := pix_x_int - 0;
+            char_y_hundreds_var := pix_y_int - 10;
+            font_word_hundreds <= FONT_ROM(digit_hundreds, char_y_hundreds_var);
+            font_bit_hundreds  <= font_word_hundreds(4 - char_x_hundreds_var);
+            if font_bit_hundreds = '1' then
+                digit_hundreds_on <= '1';
+            end if;
+        else
+            digit_hundreds_on <= '0';
+        end if;
+    end process;
+
+    -- Font Extraction for Tens Digit
+    process (pix_x_int, pix_y_int, digit_tens)
+        variable char_x_tens_var, char_y_tens_var : integer range 0 to 4;
+    begin
+        digit_tens_on <= '0';
+        if (pix_x_int >= 10) and (pix_x_int < 15) and 
+           (pix_y_int >= 10) and (pix_y_int < 18) then
+            char_x_tens_var := pix_x_int - 10;
+            char_y_tens_var := pix_y_int - 10;
+            font_word_tens <= FONT_ROM(digit_tens, char_y_tens_var);
+            font_bit_tens  <= font_word_tens(4 - char_x_tens_var);
+            if font_bit_tens = '1' then
+                digit_tens_on <= '1';
+            end if;
+        else
+            digit_tens_on <= '0';
+        end if;
+    end process;
+
+    -- Font Extraction for Units Digit
+    process (pix_x_int, pix_y_int, digit_units)
+        variable char_x_units_var, char_y_units_var : integer range 0 to 4;
+    begin
+        digit_units_on <= '0';
+        if (pix_x_int >= 20) and (pix_x_int < 25) and 
+           (pix_y_int >= 10) and (pix_y_int < 18) then
+            char_x_units_var := pix_x_int - 20;
+            char_y_units_var := pix_y_int - 10;
+            font_word_units <= FONT_ROM(digit_units, char_y_units_var);
+            font_bit_units  <= font_word_units(4 - char_x_units_var);
+            if font_bit_units = '1' then
+                digit_units_on <= '1';
+            end if;
+        else
+            digit_units_on <= '0';
+        end if;
+    end process;
+
+    -- Lives Display Logic
+    process (pix_x_int, pix_y_int, lives)
+        variable char_x_lives_var, char_y_lives_var : integer range 0 to 4;
+    begin
+        lives_digit_on <= '0';
+        if (pix_x_int >= 30) and (pix_x_int < 35) and 
+           (pix_y_int >= 10) and (pix_y_int < 18) then
+            char_x_lives_var := pix_x_int - 30;
+            char_y_lives_var := pix_y_int - 10;
+            font_word_lives <= FONT_ROM(lives, char_y_lives_var);
+            font_bit_lives  <= font_word_lives(4 - char_x_lives_var);
+            if font_bit_lives = '1' then
+                lives_digit_on <= '1';
+            end if;
+        else
+            lives_digit_on <= '0';
+        end if;
+    end process;
+
+    --Shoaib
+    -- Combine Graphics for RGB Output
+    process (video_on, brick_on, paddle_on, ball_on, digit_hundreds_on, digit_tens_on, digit_units_on, lives_digit_on, game_over, brick_rgb, paddle_rgb, ball_rgb)
+    begin
+        if (video_on = '0') then
+            graph_rgb <= "000"; -- Black when video is off
+        else 
+            if game_over = '1' then
+                graph_rgb <= "010"; -- Blue screen for game over
+            else
+                if (lives_digit_on = '1') then
+                    graph_rgb <= "011"; -- Cyan color for lives digit
+                elsif (digit_hundreds_on = '1') then
+                    graph_rgb <= "001"; -- Green color for hundreds digit
+                elsif (digit_tens_on = '1') then
+                    graph_rgb <= "001"; -- Green color for tens digit
+                elsif (digit_units_on = '1') then
+                    graph_rgb <= "001"; -- Green color for units digit
+                elsif (ball_on = '1') then
+                    graph_rgb <= ball_rgb; -- Ball color (Magenta)
+                elsif (brick_on = '1') then
+                    graph_rgb <= brick_rgb; -- Brick with outline
+                elsif (paddle_on = '1') then
+                    graph_rgb <= paddle_rgb; -- Paddle color (White)
+                else
+                    graph_rgb <= "000"; -- Black background
+                end if;
+            end if;
+        end if;
+    end process;
+
+end rtl;
