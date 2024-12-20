@@ -13,9 +13,13 @@ File path to access project: Pong & Brick Breaker -> Pong and Brick Breaker -> V
 This was made using Vivado 2022.3. It can be run on nearly any version of Vivado as long as the IP is updated.
 
 To Update IP: 1) Upgrade the project to your version of Vivado
+
 2) Click IP Catalog (In left panel), delete the User Repository (it points to the wrong directory) -- right click and 'Remove from project'
+
 3) Click Setting, expand IP, click Repository, click the '+' sign, and navigate to
    <path>/VivadoHDMIAndGPIO/z7_hdmi_driver/ip
    and click select
+   
 4) Click IP Status tab along bottom, click 'Upgrade Selected'
+
 5) Run synthesis, implementation and generate bitstream
